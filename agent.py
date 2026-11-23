@@ -489,7 +489,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             {"messages": [HumanMessage(content=query)]},
         )
         messages = result.get("messages", [])
-        final_answer = messages[-1].content if messages else "No response returned."
+        final_answer = messages[-1].text if messages else "No response returned."
 
         print("\nFinal Answer:")
         print("=" * 70)
