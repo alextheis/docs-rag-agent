@@ -1,4 +1,4 @@
-# Baqer's Deep Agents RAG Module — Implementation Report
+#Deep Agents RAG Module — Implementation Report
 
 ## 1. Architecture Overview
 

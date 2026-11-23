@@ -1,6 +1,6 @@
 """Deep Agents RAG Orchestrator and Retrieval Module.
 
-Implements Baqer's assigned portion of the university RAG lab:
+Implements assigned portion of the university RAG lab:
 - Custom retrieval tool with state filesystem offloading
 - Subagent definition for chunk analysis
 - Five-step RAG prompt engineering and security safeguards
@@ -387,7 +387,7 @@ def build_index_for_source(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for selecting index source, query, and debug mode."""
     parser = argparse.ArgumentParser(
-        description="Run Baqer's Deep Agents RAG orchestrator on LangChain docs or OSU Strategic Plan PDF."
+        description="Run Deep Agents RAG orchestrator on LangChain docs or OSU Strategic Plan PDF."
     )
     parser.add_argument(
         "--source",
@@ -424,7 +424,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parse_args(argv)
 
     print("=" * 70)
-    print(f"Baqer's Deep Agents RAG Module — Source: {args.source.upper()}")
+    print(f" Deep Agents RAG Module — Source: {args.source.upper()}")
     print("=" * 70)
 
     # Check for Gemini / provider credentials
