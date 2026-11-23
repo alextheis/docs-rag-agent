@@ -1,0 +1,43 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.9, pytest-9.2.0, pluggy-1.7.0 -- /home/baqer/Rag_project/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/baqer/Rag_project
+configfile: pytest.ini
+plugins: anyio-4.16.0, langsmith-0.16.0
+collecting ... collected 27 items
+
+tests/test_agent.py::test_retrieval_calls_similarity_search_k4 PASSED    [  3%]
+tests/test_agent.py::test_generated_file_paths_follow_pattern PASSED     [  7%]
+tests/test_agent.py::test_file_contents_include_source_heading PASSED    [ 11%]
+tests/test_agent.py::test_files_encoded_as_utf8_bytes PASSED             [ 14%]
+tests/test_agent.py::test_retrieval_returns_paths_rather_than_raw_text PASSED [ 18%]
+tests/test_agent.py::test_retrieval_handles_zero_results PASSED          [ 22%]
+tests/test_agent.py::test_upload_failures_reported PASSED                [ 25%]
+tests/test_agent.py::test_subagent_configuration_valid PASSED            [ 29%]
+tests/test_agent.py::test_orchestrator_tools_and_instructions PASSED     [ 33%]
+tests/test_agent.py::test_retrieved_files_accessible_by_subagent PASSED  [ 37%]
+tests/test_agent.py::test_malicious_instructions_treated_as_untrusted PASSED [ 40%]
+tests/test_agent.py::test_citation_url_validation_and_grounding PASSED   [ 44%]
+tests/test_agent.py::test_full_end_to_end_orchestration_flow PASSED      [ 48%]
+tests/test_agent.py::test_uninitialized_vector_store_guard PASSED        [ 51%]
+tests/test_agent.py::test_batch_id_format PASSED                         [ 55%]
+tests/test_security.py::test_malicious_chunk_indirect_prompt_injection PASSED [ 59%]
+tests/test_security.py::test_path_confinement_to_retrieved_namespace PASSED [ 62%]
+tests/test_security.py::test_security_prompt_boundaries PASSED           [ 66%]
+tests/test_security.py::test_citation_url_source_validation PASSED       [ 70%]
+tests/test_security.py::test_simulated_attack_defense_flow PASSED        [ 74%]
+tests/test_osu_rag.py::test_osu_pdf_page_metadata_and_numbering PASSED   [ 77%]
+tests/test_osu_rag.py::test_mgel_table_strategy_metric_relationships PASSED [ 81%]
+tests/test_osu_rag.py::test_osu_vector_store_retrieves_all_three_mgel_facts PASSED [ 85%]
+tests/test_osu_rag.py::test_osu_offload_preserves_page_metadata_and_hides_raw_text PASSED [ 88%]
+tests/test_osu_rag.py::test_osu_full_rag_delegation_pipeline PASSED      [ 92%]
+tests/test_osu_rag.py::test_cli_source_configuration PASSED              [ 96%]
+tests/test_osu_rag.py::test_printed_page_extractor_edge_cases PASSED     [100%]
+
+=============================== warnings summary ===============================
+osu_indexing.py:18
+  /home/baqer/Rag_project/osu_indexing.py:18: DeprecationWarning: `langchain-community` is being sunset and is no longer actively maintained. See https://github.com/langchain-ai/langchain-community/issues/674 for details and migration guidance toward standalone integration packages.
+    from langchain_community.document_loaders import PyPDFLoader
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 27 passed, 1 warning in 17.77s ========================

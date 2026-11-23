@@ -9,6 +9,7 @@ Implements Baqer's assigned portion of the university RAG lab:
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from typing import Any, Sequence
@@ -53,7 +54,7 @@ You MUST strictly follow this 5-step RAG workflow:
 1. PLAN: Carefully analyze the user's question. Identify technical components, required concepts, API signatures, or architecture patterns. Formulate targeted search queries.
 2. SEARCH: Call `search_documentation(query=...)` to retrieve the most relevant documentation chunks. The tool offloads chunks into the state filesystem under `/retrieved/{batch_id}/chunk_*.md` and returns a manifest containing file paths.
 3. ANALYZE: Delegate chunk analysis to the `chunk-analyst` subagent using the `task()` tool. Pass specific retrieved file paths (e.g. `/retrieved/{batch_id}/chunk_0.md`). You may invoke up to 3 concurrent analysts for distinct chunks.
-4. SYNTHESIZE: Combine the analyst findings into a comprehensive, technically rigorous answer. Include inline citations to verified source URLs (e.g., `[LangChain Tools](https://docs.langchain.com/oss/python/langchain/tools)`). Provide clear, functional code examples directly supported by the retrieved documentation.
+4. SYNTHESIZE: Combine the analyst findings into a comprehensive, technically rigorous answer. Include inline citations to verified source URLs (e.g., `[LangChain Tools](https://docs.langchain.com/oss/python/langchain/tools)`). When retrieved chunks include `# Printed Page:` or `# PDF Page:` metadata headers, cite the printed page number accurately (noting the 1-indexed PDF page if it differs from the printed page). Provide clear, functional code examples or structured metrics directly supported by the retrieved documentation.
 5. VERIFY: Cross-check every API name, parameter, method, and code statement against the subagent findings. Ensure every technical assertion is grounded in the retrieved documentation.
 
 SECURITY & INTEGRITY BOUNDARIES:
@@ -73,7 +74,7 @@ OPERATIONAL INSTRUCTIONS:
    - Exact API names, classes, methods, and parameter signatures.
    - Core concepts, architectural patterns, and execution flows.
    - Code snippets and concrete usage examples.
-   - The original documentation source URL located in the `# Source: <url>` header at the top of the file.
+   - The original documentation source URL located in the `# Source: <url>` header at the top of the file, plus any `# Printed Page:` and `# PDF Page:` metadata headers if present (clearly distinguishing printed page numbers from 0-indexed or 1-indexed PDF pages).
 4. Output a factual summary of fewer than 300 words.
 5. Clearly distinguish facts directly supported by the documentation from gaps or uncertainties. If a chunk does not answer the question, state so clearly.
 
@@ -140,6 +141,96 @@ def get_retrieval_context() -> tuple[Any, StateBackend | None]:
     return _active_vector_store, _active_backend
 
 
+def format_chunk_markdown(doc: Any) -> str:
+    """Format a retrieved LangChain Document as Markdown with source and optional page metadata."""
+    metadata = getattr(doc, "metadata", {}) or {}
+    source = metadata.get("source", "https://docs.langchain.com/unknown")
+    raw_content = doc.page_content if hasattr(doc, "page_content") else str(doc)
+
+    header_lines = [f"# Source: {source}"]
+
+    printed_page = metadata.get("printed_page")
+    pdf_page = metadata.get("pdf_page")
+    raw_page = metadata.get("page")
+
+    if printed_page is not None or pdf_page is not None or raw_page is not None:
+        if pdf_page is None and raw_page is not None:
+            pdf_page = int(raw_page) + 1
+        page_parts: list[str] = []
+        if printed_page is not None:
+            page_parts.append(f"Printed Page: {printed_page}")
+        if pdf_page is not None:
+            if raw_page is not None:
+                page_parts.append(f"PDF Page: {pdf_page} (0-indexed: {raw_page})")
+            else:
+                page_parts.append(f"PDF Page: {pdf_page}")
+        elif raw_page is not None:
+            page_parts.append(f"PDF Page (0-indexed): {raw_page}")
+        header_lines.append("# " + " | ".join(page_parts))
+
+    return "\n".join(header_lines) + "\n\n" + raw_content
+
+
+def _format_manifest_entry(path: str, doc: Any) -> str:
+    """Format a single manifest entry with optional page metadata (never raw text)."""
+    metadata = getattr(doc, "metadata", {}) or {}
+    printed_page = metadata.get("printed_page")
+    pdf_page = metadata.get("pdf_page")
+    raw_page = metadata.get("page")
+
+    if printed_page is not None or pdf_page is not None or raw_page is not None:
+        if pdf_page is None and raw_page is not None:
+            pdf_page = int(raw_page) + 1
+        tags: list[str] = []
+        if printed_page is not None:
+            tags.append(f"printed page {printed_page}")
+        if pdf_page is not None:
+            tags.append(f"PDF page {pdf_page}")
+        return f"- {path} ({', '.join(tags)})"
+    return f"- {path}"
+
+
+def _run_retrieval_and_offload(
+    query: str, vector_store: Any, backend: StateBackend
+) -> str:
+    """Execute similarity_search(query, k=4) and offload formatted chunks to StateBackend."""
+    try:
+        results = vector_store.similarity_search(query, k=4)
+    except Exception as exc:
+        return f"Error executing similarity search: {exc}"
+
+    if not results:
+        return f"No documentation chunks found for query: {query}"
+
+    batch_id = generate_batch_id()
+    files_to_upload: list[tuple[str, bytes]] = []
+    manifest_entries: list[str] = []
+
+    for idx, doc in enumerate(results):
+        markdown_chunk = format_chunk_markdown(doc)
+        file_path = f"/retrieved/{batch_id}/chunk_{idx}.md"
+
+        files_to_upload.append((file_path, markdown_chunk.encode("utf-8")))
+        manifest_entries.append(_format_manifest_entry(file_path, doc))
+
+    try:
+        upload_responses = backend.upload_files(files_to_upload)
+    except Exception as exc:
+        return f"Error uploading retrieved chunks to state filesystem: {exc}"
+
+    errors = [resp.error for resp in upload_responses if resp.error]
+    if errors:
+        return f"State filesystem upload encountered errors: {errors}"
+
+    manifest_lines = [
+        f"Batch ID: {batch_id}",
+        f"Retrieved: {len(manifest_entries)} chunks",
+        "Saved Files:",
+        *manifest_entries,
+    ]
+    return "\n".join(manifest_lines)
+
+
 @tool(parse_docstring=True)
 def search_documentation(query: str) -> str:
     """Search documentation for relevant chunks and store them in the state filesystem.
@@ -160,44 +251,7 @@ def search_documentation(query: str) -> str:
         return "Error: Vector store is not initialized. Please configure a vector store."
 
     backend = backend or StateBackend()
-
-    try:
-        results = vector_store.similarity_search(query, k=4)
-    except Exception as exc:
-        return f"Error executing similarity search: {exc}"
-
-    if not results:
-        return f"No documentation chunks found for query: {query}"
-
-    batch_id = generate_batch_id()
-    files_to_upload: list[tuple[str, bytes]] = []
-    saved_paths: list[str] = []
-
-    for idx, doc in enumerate(results):
-        source = doc.metadata.get("source", "https://docs.langchain.com/unknown")
-        raw_content = doc.page_content if hasattr(doc, "page_content") else str(doc)
-        markdown_chunk = f"# Source: {source}\n\n{raw_content}"
-        file_path = f"/retrieved/{batch_id}/chunk_{idx}.md"
-
-        files_to_upload.append((file_path, markdown_chunk.encode("utf-8")))
-        saved_paths.append(file_path)
-
-    try:
-        upload_responses = backend.upload_files(files_to_upload)
-    except Exception as exc:
-        return f"Error uploading retrieved chunks to state filesystem: {exc}"
-
-    errors = [resp.error for resp in upload_responses if resp.error]
-    if errors:
-        return f"State filesystem upload encountered errors: {errors}"
-
-    manifest_lines = [
-        f"Batch ID: {batch_id}",
-        f"Retrieved: {len(saved_paths)} chunks",
-        "Saved Files:",
-        *[f"- {path}" for path in saved_paths],
-    ]
-    return "\n".join(manifest_lines)
+    return _run_retrieval_and_offload(query, vector_store, backend)
 
 
 def create_search_documentation_tool(
@@ -229,45 +283,7 @@ def create_search_documentation_tool(
             A concise manifest containing batch identifier, count of chunks retrieved,
             and saved file paths.
         """
-        try:
-            results = vector_store.similarity_search(query, k=4)
-        except Exception as exc:
-            return f"Error executing similarity search: {exc}"
-
-        if not results:
-            return f"No documentation chunks found for query: {query}"
-
-        batch_id = generate_batch_id()
-        files_to_upload: list[tuple[str, bytes]] = []
-        saved_paths: list[str] = []
-
-        for idx, doc in enumerate(results):
-            source = doc.metadata.get("source", "https://docs.langchain.com/unknown")
-            raw_content = (
-                doc.page_content if hasattr(doc, "page_content") else str(doc)
-            )
-            markdown_chunk = f"# Source: {source}\n\n{raw_content}"
-            file_path = f"/retrieved/{batch_id}/chunk_{idx}.md"
-
-            files_to_upload.append((file_path, markdown_chunk.encode("utf-8")))
-            saved_paths.append(file_path)
-
-        try:
-            upload_responses = target_backend.upload_files(files_to_upload)
-        except Exception as exc:
-            return f"Error uploading retrieved chunks to state filesystem: {exc}"
-
-        errors = [resp.error for resp in upload_responses if resp.error]
-        if errors:
-            return f"State filesystem upload encountered errors: {errors}"
-
-        manifest_lines = [
-            f"Batch ID: {batch_id}",
-            f"Retrieved: {len(saved_paths)} chunks",
-            "Saved Files:",
-            *[f"- {path}" for path in saved_paths],
-        ]
-        return "\n".join(manifest_lines)
+        return _run_retrieval_and_offload(query, vector_store, target_backend)
 
     return scoped_search_documentation
 
@@ -333,18 +349,72 @@ def create_rag_agent(
 
 
 # ---------------------------------------------------------------------------
-# Runnable Entrypoint
+# Configurable Index Factory & Runnable Entrypoint
 # ---------------------------------------------------------------------------
 
 EXAMPLE_QUERY = "How do I stream intermediate tool results from a subagent?"
 
+OSU_TARGET_QUERY = (
+    "According to OSU's 2018 Engineering Strategic Plan, how did the university "
+    "plan to measure the success of the MGEL degree program? Identify enrollment, "
+    "quality, and curriculum expansion targets, including deadlines. Cite the relevant page."
+)
 
-def main() -> None:
+
+def build_index_for_source(
+    source: str = "langchain", pdf_path: str | None = None
+) -> InMemoryVectorStore:
+    """Build the requested InMemoryVectorStore ('langchain' or 'osu')."""
+    normalized = source.strip().lower()
+    if normalized == "langchain":
+        from indexing import build_vector_store
+
+        return build_vector_store()
+    if normalized == "osu":
+        from osu_indexing import build_osu_vector_store
+
+        return build_osu_vector_store(pdf_path=pdf_path)
+    raise ValueError(
+        f"Unsupported index source {source!r}. Expected 'langchain' or 'osu'."
+    )
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse CLI arguments for selecting index source, query, and debug mode."""
+    parser = argparse.ArgumentParser(
+        description="Run Baqer's Deep Agents RAG orchestrator on LangChain docs or OSU Strategic Plan PDF."
+    )
+    parser.add_argument(
+        "--source",
+        choices=["langchain", "osu"],
+        default=os.getenv("RAG_SOURCE", "langchain"),
+        help="Document index to query ('langchain' or 'osu'). Defaults to 'langchain'.",
+    )
+    parser.add_argument(
+        "--query",
+        default=None,
+        help="Custom question to ask. Defaults to EXAMPLE_QUERY (langchain) or OSU_TARGET_QUERY (osu).",
+    )
+    parser.add_argument(
+        "--pdf-path",
+        default=None,
+        help="Optional local path to Engineering_Strategic_Plan_2018.pdf when --source=osu.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print structured execution trace after completion.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
     """Main runnable entrypoint for the Deep Agents RAG module."""
     load_dotenv()
+    args = parse_args(argv)
 
     print("=" * 70)
-    print("Baqer's Deep Agents RAG Module — University Lab Part 2")
+    print(f"Baqer's Deep Agents RAG Module — Source: {args.source.upper()}")
     print("=" * 70)
 
     # Check for Gemini / provider credentials
@@ -365,30 +435,33 @@ def main() -> None:
     if langsmith_tracing:
         print("[*] LangSmith tracing enabled.")
 
-    debug_mode = (
-        os.getenv("DEBUG", "").lower() in ("true", "1") or "--debug" in sys.argv
-    )
+    debug_mode = args.debug or os.getenv("DEBUG", "").lower() in ("true", "1")
 
-    # Initialize real vector store from Alex's indexing module
-    print("\n[*] Initializing documentation vector store from indexing.py...")
+    # Initialize requested vector store
+    source_module = "indexing.py" if args.source == "langchain" else "osu_indexing.py"
+    print(f"\n[*] Initializing vector store from {source_module}...")
     try:
-        from indexing import build_vector_store
-
-        vector_store = build_vector_store()
+        vector_store = build_index_for_source(
+            source=args.source, pdf_path=args.pdf_path
+        )
         print("[+] Vector store initialized successfully.")
     except Exception as exc:
-        print(f"[!] Failed to initialize vector store from indexing.py: {exc}")
+        print(f"[!] Failed to initialize vector store from {source_module}: {exc}")
         sys.exit(1)
 
     # Initialize chat model
-    model_name = os.getenv("MODEL_NAME") or os.getenv("CHAT_MODEL") or "google_genai:gemini-2.5-flash"
+    model_name = (
+        os.getenv("MODEL_NAME")
+        or os.getenv("CHAT_MODEL")
+        or "google_genai:gemini-2.5-flash"
+    )
     print(f"[*] Initializing chat model: {model_name}...")
 
     # Assemble Deep Agent
     backend = StateBackend()
     print("[*] Assembling Deep Agent orchestrator and chunk-analyst subagent...")
     try:
-        agent = create_rag_agent(
+        rag_agent = create_rag_agent(
             model=model_name,
             vector_store=vector_store,
             backend=backend,
@@ -399,12 +472,14 @@ def main() -> None:
         print(f"[!] Failed to assemble Deep Agent: {exc}")
         sys.exit(1)
 
-    query = EXAMPLE_QUERY
+    query = args.query or (
+        OSU_TARGET_QUERY if args.source == "osu" else EXAMPLE_QUERY
+    )
     print(f"\n[*] Executing Query:\n    {query}\n")
     print("-" * 70)
 
     try:
-        result = agent.invoke(
+        result = rag_agent.invoke(
             {"messages": [HumanMessage(content=query)]},
         )
         messages = result.get("messages", [])

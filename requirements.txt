@@ -8,3 +8,6 @@ python-dotenv
 requests
 pytest
 langchain-google-genai
+langchain-community
+pypdf
+
