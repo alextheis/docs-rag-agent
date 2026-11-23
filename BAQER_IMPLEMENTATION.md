@@ -122,7 +122,7 @@ Configure your `.env` file based on `.env.example`:
 ```bash
 GOOGLE_API_KEY=your_google_api_key_here
 # Optional configuration:
-MODEL_NAME=google_genai:gemini-2.5-flash
+MODEL_NAME=google_genai:gemini-3.8-flash
 LANGSMITH_TRACING=false
 LANGSMITH_API_KEY=
 ```

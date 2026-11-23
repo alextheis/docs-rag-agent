@@ -293,6 +293,9 @@ def create_search_documentation_tool(
 # ---------------------------------------------------------------------------
 
 
+DEFAULT_CHAT_MODEL = "google_genai:gemini-3.8-flash"
+
+
 def get_chat_model(model_name: str | None = None) -> BaseChatModel | str:
     """Initialize or resolve the chat model from configuration.
 
@@ -303,7 +306,7 @@ def get_chat_model(model_name: str | None = None) -> BaseChatModel | str:
         model_name
         or os.getenv("CHAT_MODEL")
         or os.getenv("MODEL_NAME")
-        or "google_genai:gemini-2.5-flash"
+        or DEFAULT_CHAT_MODEL
     )
     return selected_model
 
@@ -333,6 +336,8 @@ def create_rag_agent(
         set_retrieval_context(vector_store, resolved_backend)
 
     resolved_model = model or get_chat_model()
+    if isinstance(resolved_model, str):
+        resolved_model = init_chat_model(resolved_model, max_retries=6)
     resolved_subagents = (
         list(subagents) if subagents is not None else [chunk_analyst_subagent]
     )
@@ -401,6 +406,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Optional local path to Engineering_Strategic_Plan_2018.pdf when --source=osu.",
     )
     parser.add_argument(
+        "--model",
+        default=None,
+        help="Optional chat model override (e.g. 'google_genai:gemini-3.8-flash').",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Print structured execution trace after completion.",
@@ -450,11 +460,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         sys.exit(1)
 
     # Initialize chat model
-    model_name = (
-        os.getenv("MODEL_NAME")
-        or os.getenv("CHAT_MODEL")
-        or "google_genai:gemini-2.5-flash"
-    )
+    model_name = get_chat_model(args.model)
     print(f"[*] Initializing chat model: {model_name}...")
 
     # Assemble Deep Agent
