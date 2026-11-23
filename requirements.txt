@@ -1,0 +1,10 @@
+deepagents
+langchain
+langchain-core
+langchain-text-splitters
+langchain-huggingface
+sentence-transformers
+python-dotenv
+requests
+pytest
+langchain-google-genai
